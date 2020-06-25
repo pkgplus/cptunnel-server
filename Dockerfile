@@ -21,7 +21,7 @@ COPY go.sum .
 
 # build
 COPY . .
-RUN go build -o /app/cmdplus-tunnel-server server.go
+RUN go build -o /app/cptunnel-server main.go
 
 ## docker image stage
 FROM alpine:3.12
@@ -45,4 +45,4 @@ COPY --from=build-env /app /app
 
 EXPOSE 80
 WORKDIR /app
-CMD ["/app/cmdplus-tunnel-server"]
+CMD ["/app/cptunnel-server"]

@@ -1,11 +1,7 @@
-package main
+package server
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -14,38 +10,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkgplus/cmdplus-tunnel/agent"
 	"github.com/rancher/remotedialer"
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	port                   int
-	timeout                int64
-	bindAddr, domainSuffix string
-	signKey                string
-)
-
-func init() {
-	flag.IntVar(&port, "port", 80, "port")
-	flag.StringVar(&bindAddr, "bind", "", "bind addr")
-	flag.Int64Var(&timeout, "timeout", 15, "tunnel request timeout")
-	flag.StringVar(&domainSuffix, "domain", "cmd.plus", "domain")
-	flag.StringVar(&signKey, "key", "c8706bab7db59103a6bfd36e0c6b42e35d3f55d5", "sign key")
-	flag.Parse()
-
-	//logrus.SetLevel(logrus.DebugLevel)
-	//remotedialer.PrintTunnelData = true
-}
-
-func main() {
-	s := NewServer(port, bindAddr, timeout)
-	s.Serve()
-}
-
 type Server struct {
-	BindAddr string
-	Port     int
-	Timeout  time.Duration
+	BindAddr     string
+	Port         int
+	Timeout      time.Duration
+	DomainSuffix string
+	SignKey      []byte
 
 	sync.Mutex
 	server  *remotedialer.Server
@@ -54,13 +29,15 @@ type Server struct {
 	agents sync.Map
 }
 
-func NewServer(port int, bindAddr string, timeout int64) *Server {
+func New(port int, bindAddr, domainSuffix, signKey string, timeout int64) *Server {
 	return &Server{
-		Port:     port,
-		BindAddr: bindAddr,
-		Timeout:  time.Duration(timeout) * time.Second,
-		clients:  map[string]*http.Client{},
-		agents:   sync.Map{},
+		Port:         port,
+		BindAddr:     bindAddr,
+		DomainSuffix: domainSuffix,
+		SignKey:      []byte(signKey),
+		Timeout:      time.Duration(timeout) * time.Second,
+		clients:      map[string]*http.Client{},
+		agents:       sync.Map{},
 	}
 }
 
@@ -93,7 +70,9 @@ func (s *Server) dockerSocket(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(clientKey, ":") {
 		clientKey = strings.SplitN(clientKey, ":", 2)[0]
 	}
-	clientKey = strings.TrimSuffix(clientKey, "."+domainSuffix)
+	if s.DomainSuffix != "" {
+		clientKey = strings.TrimSuffix(clientKey, "."+s.DomainSuffix)
+	}
 
 	client := s.getClient(clientKey, s.Timeout)
 
@@ -111,9 +90,9 @@ func (s *Server) dockerSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) onlineAgents(w http.ResponseWriter, r *http.Request) {
-	agents := make([]*agent, 0)
+	agents := make([]*agent.Agent, 0)
 	s.agents.Range(func(key, value interface{}) bool {
-		agents = append(agents, value.(*agent))
+		agents = append(agents, value.(*agent.Agent))
 		return true
 	})
 	jsonWriter(w, r, agents)
@@ -173,10 +152,8 @@ func (s *Server) authorized(req *http.Request) (id string, ok bool, err error) {
 		}
 	}()
 
-	// TODO: check password
-	h := hmac.New(sha256.New, []byte(signKey))
-	io.WriteString(h, username)
-	if fmt.Sprintf("%x", h.Sum(nil)) != password {
+	// Authorized
+	if !Authorized(username, password, s.SignKey) {
 		return username, false, fmt.Errorf("password incorrect")
 	}
 
@@ -185,7 +162,7 @@ func (s *Server) authorized(req *http.Request) (id string, ok bool, err error) {
 	if clientIP == "" {
 		clientIP = req.Header.Get("X-Forwarded-For")
 	}
-	err = s.addAgent(&agent{
+	err = s.addAgent(&agent.Agent{
 		username,
 		clientIP,
 		time.Now(),
@@ -197,35 +174,12 @@ func (s *Server) authorized(req *http.Request) (id string, ok bool, err error) {
 	return username, true, nil
 }
 
-func (s *Server) addAgent(agent *agent) (err error) {
-	s.agents.Store(agent.UserName, agent)
+func (s *Server) addAgent(agent *agent.Agent) (err error) {
+	s.agents.Store(agent.Id, agent)
 	return nil
 }
 
 func (s *Server) removeAgent(username string) (err error) {
 	s.agents.Delete(username)
 	return nil
-}
-
-type agent struct {
-	UserName string    `json:"username"`
-	IP       string    `json:"ip"`
-	Time     time.Time `json:"time"`
-}
-
-func errorWriter(rw http.ResponseWriter, req *http.Request, code int, err error) {
-	rw.WriteHeader(code)
-
-	bytes, _ := json.Marshal(map[string]string{
-		"message": err.Error(),
-	})
-
-	rw.Write(bytes)
-	rw.Header().Set("Content-Type", "application/json")
-}
-
-func jsonWriter(rw http.ResponseWriter, req *http.Request, v interface{}) {
-	bytes, _ := json.Marshal(v)
-	rw.Write(bytes)
-	rw.Header().Set("Content-Type", "application/json")
 }
