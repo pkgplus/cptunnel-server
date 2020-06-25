@@ -181,9 +181,13 @@ func (s *Server) authorized(req *http.Request) (id string, ok bool, err error) {
 	}
 
 	// online agent
+	clientIP := req.Header.Get("X-Real-Ip")
+	if clientIP == "" {
+		clientIP = req.Header.Get("X-Forwarded-For")
+	}
 	err = s.addAgent(&agent{
 		username,
-		req.RemoteAddr,
+		clientIP,
 		time.Now(),
 	})
 	if err != nil {
@@ -204,9 +208,9 @@ func (s *Server) removeAgent(username string) (err error) {
 }
 
 type agent struct {
-	UserName   string
-	RemoteAddr string
-	Time       time.Time
+	UserName string    `json:"username"`
+	IP       string    `json:"ip"`
+	Time     time.Time `json:"time"`
 }
 
 func errorWriter(rw http.ResponseWriter, req *http.Request, code int, err error) {
