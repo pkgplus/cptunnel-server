@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,6 +22,7 @@ var (
 	port                   int
 	timeout                int64
 	bindAddr, domainSuffix string
+	signKey                string
 )
 
 func init() {
@@ -27,6 +30,7 @@ func init() {
 	flag.StringVar(&bindAddr, "bind", "", "bind addr")
 	flag.Int64Var(&timeout, "timeout", 15, "tunnel request timeout")
 	flag.StringVar(&domainSuffix, "domain", "cmd.plus", "domain")
+	flag.StringVar(&signKey, "key", "c8706bab7db59103a6bfd36e0c6b42e35d3f55d5", "sign key")
 	flag.Parse()
 
 	//logrus.SetLevel(logrus.DebugLevel)
@@ -158,7 +162,7 @@ func (s *Server) getClient(clientKey string, timeout time.Duration) *http.Client
 }
 
 func (s *Server) authorized(req *http.Request) (id string, ok bool, err error) {
-	username, _, ok := req.BasicAuth()
+	username, password, ok := req.BasicAuth()
 	if !ok {
 		return "", false, nil
 	}
@@ -170,6 +174,11 @@ func (s *Server) authorized(req *http.Request) (id string, ok bool, err error) {
 	}()
 
 	// TODO: check password
+	h := hmac.New(sha256.New, []byte(signKey))
+	io.WriteString(h, username)
+	if fmt.Sprintf("%x", h.Sum(nil)) != password {
+		return username, false, fmt.Errorf("password incorrect")
+	}
 
 	// online agent
 	err = s.addAgent(&agent{
