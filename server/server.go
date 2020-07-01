@@ -99,13 +99,13 @@ func (s *Server) onlineAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) onlineAgent(w http.ResponseWriter, r *http.Request) {
-	username := r.URL.Query().Get("name")
-	if username == "" {
-		errorWriter(w, r, 400, errors.New("missing \"name\" query param"))
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		errorWriter(w, r, 400, errors.New("missing \"id\" query param"))
 		return
 	}
 
-	agent, found := s.agents.Load(username)
+	agent, found := s.agents.Load(id)
 	if !found {
 		errorWriter(w, r, 400, errors.New("agent not online"))
 		return
