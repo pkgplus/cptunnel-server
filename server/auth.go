@@ -10,5 +10,5 @@ import (
 func Authorized(username, password string, key []byte) bool {
 	h := hmac.New(sha256.New, key)
 	io.WriteString(h, username)
-	return fmt.Sprintf("%x", h.Sum(nil)) != password
+	return fmt.Sprintf("%x", h.Sum(nil)) == password
 }
